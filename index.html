@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>توصيل فلسطين</title>
+<meta name="robots" content="noindex">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f7f2;--card:#fff;--ink:#17211b;--mute:#5d6b62;--green:#2f6b3a;--red:#d2424a;--line:#d9e2d6}
+@media(prefers-color-scheme:dark){:root{--bg:#101612;--card:#18211b;--ink:#eef3ec;--mute:#9db0a2;--green:#6fbf7d;--red:#ff7d85;--line:#2b3a30}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Tajawal,system-ui,sans-serif;line-height:1.6;padding-top:env(safe-area-inset-top,0px)}
+header,nav,main{max-width:640px;margin:auto;padding-inline:18px}
+header{padding-top:24px}
+h1{margin:0;font-size:28px;font-weight:800;border-inline-start:8px solid var(--red);padding-inline-start:12px}
+nav{display:flex;gap:6px;margin-block:14px}
+nav button{flex:1;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px;border-radius:8px;font:inherit;cursor:pointer}
+nav button.on{background:var(--green);color:#fff;border-color:var(--green)}
+main{padding-bottom:70px}
+section{display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+section.on{display:block}
+h2{margin:0 0 4px;font-size:19px}h3{margin:18px 0 4px;font-size:16px}
+label{display:block;margin:12px 0 4px;font-weight:500}
+input,select,textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:var(--bg);color:var(--ink)}
+:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+.go{margin-top:14px;width:100%;padding:12px;border:0;border-radius:8px;background:var(--red);color:#fff;font:inherit;font-weight:800;cursor:pointer}
+.alt{background:var(--green)}
+.item{border-top:1px solid var(--line);padding:12px 0}
+.mute{color:var(--mute);font-size:14px}
+a{color:var(--green);font-weight:500}
+.pill{display:inline-block;padding:0 10px;border-radius:99px;background:var(--line);font-size:13px}
+.s-new{background:#f7d9a8;color:#5a3b00}.s-accepted,.s-picked{background:#c6e3cb;color:#17401f}.s-cancelled{background:#f3c6c9;color:#6b1219}
+.b{border:1px solid var(--line);background:none;color:var(--ink);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer;margin-inline-end:6px;margin-top:6px}
+.b.p{background:var(--green);color:#fff;border-color:var(--green)}.b.x{color:var(--red)}
+.row{display:flex;gap:8px}.row>*{flex:1}
+#toast{position:fixed;bottom:20px;inset-inline:18px;max-width:600px;margin:auto;background:var(--ink);color:var(--bg);padding:12px;border-radius:8px;display:none;text-align:center;z-index:9}
+.note{background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:10px;font-size:14px;color:var(--mute);margin-top:10px}
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.kpi div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;text-align:center;font-size:13px;color:var(--mute)}.kpi b{display:block;font-size:16px;color:var(--ink)}
+.steps{display:flex;gap:4px;margin:8px 0}.steps span{flex:1;text-align:center;font-size:12px;padding:4px 2px;border-radius:6px;background:var(--line);color:var(--mute)}.steps span.on{background:var(--green);color:#fff}
+.stars{margin-top:6px;font-size:14px}.stars button{border:0;background:none;color:#e0a100;font:inherit;font-size:16px;cursor:pointer;padding:2px 6px}
+#cam video,#cam .shot,.idp{width:100%;max-height:280px;object-fit:cover;border-radius:10px;margin-top:8px;background:var(--line)}
+.av{width:48px;height:48px;border-radius:50%;object-fit:cover;float:inline-start;margin-inline-end:10px}
+.idimg{width:100%;border-radius:8px;margin-top:8px}
+.selfie{width:120px;height:120px;object-fit:cover;border-radius:50%;margin-top:8px;display:block}
+</style></head><body>
+<header><h1 id="site">توصيل فلسطين</h1></header>
+<nav id="tabs"><button data-t="c" class="on">زبون</button><button data-t="d">سائق</button></nav>
+<main>
+<div class="note" id="banner" hidden></div>
+
+<section id="c" class="on">
+<h2>اطلب توصيل</h2>
+<label>اسمك</label><input id="c_name">
+<label>رقم الجوال</label><input id="c_phone" type="tel" inputmode="tel">
+<label>المنطقة</label><select id="c_region"></select>
+<div class="note" id="c_price" hidden></div>
+<label>العنوان بالتفصيل</label><input id="c_addr">
+<label>ماذا تريد توصيله؟</label><textarea id="c_note" rows="2"></textarea>
+<button class="go" data-go="order">أرسل الطلب</button>
+<h3>طلباتي</h3>
+<div id="c_list"></div>
+</section>
+
+<section id="d">
+<div id="d_auth">
+<h2>دخول السائق</h2>
+<label>رقم الجوال</label><input id="l_phone" type="tel" inputmode="tel">
+<label>كلمة السر</label><input id="l_pass" type="password">
+<button class="go alt" data-go="login">دخول</button>
+<h2 style="margin-top:26px">تسجيل سائق جديد</h2>
+<label>الاسم</label><input id="r_name">
+<label>رقم الجوال</label><input id="r_phone" type="tel" inputmode="tel">
+<label>كلمة السر</label><input id="r_pass" type="password">
+<label>وسيلة التوصيل</label><select id="r_veh"><option>دراجة نارية</option><option>سيارة</option><option>دراجة هوائية</option><option>مشي</option></select>
+<label>منطقة العمل</label><select id="r_scope"></select>
+<label>صورة الهوية (ارفعها من الهاتف، لا يراها إلا المشرف)</label>
+<input id="r_id" type="file" accept="image/*"><img id="id_prev" class="idp" alt="" hidden>
+<label>صورتك الشخصية (بالكاميرا مباشرة، بدون رفع)</label>
+<div id="cam"><video id="cam_v" autoplay playsinline muted hidden></video><img id="cam_img" class="shot" alt="" hidden>
+<div class="row" style="margin-top:8px"><button class="b" data-go="camfront">كاميرا أمامية</button><button class="b" data-go="camrear">كاميرا خلفية</button></div>
+<button class="go alt" id="cam_snap" data-go="snap" hidden>التقاط الصورة</button></div>
+<button class="go" data-go="register">سجّلني</button>
+<div class="note">بعد التسجيل ينتظر حسابك موافقة المشرف قبل أن ترى أي طلب.</div>
+</div>
+<div id="d_dash" hidden>
+<div class="row"><h2 id="d_hi"></h2><button class="b x" data-go="logout" style="flex:0 0 auto">خروج</button></div>
+<div id="d_body"></div>
+</div>
+</section>
+
+<section id="a">
+<div id="a_auth" hidden><h2>دخول المشرف</h2><label>كلمة السر</label><input id="a_pass" type="password" autocomplete="current-password"><button class="go alt" data-go="alogin">دخول</button></div>
+<div id="a_dash" hidden>
+<div class="row"><h2>لوحة المشرف</h2><button class="b x" data-go="alogout" style="flex:0 0 auto">خروج</button></div>
+<label>كلمة السر لتأكيد العمليات المالية (العمولة، الأسعار، المناطق، التسوية، الحذف)</label><input id="k_pw" type="password" autocomplete="off">
+<div id="a_stats"></div><div id="a_octl"></div><div id="a_orders"></div>
+<h3>السائقون</h3><div id="a_drivers"></div><div id="a_cfg"></div><div id="a_audit"></div>
+</div></section>
+</main>
+<div id="toast"></div>
+
+<script src="/app.js" defer></script>
+</body></html>
