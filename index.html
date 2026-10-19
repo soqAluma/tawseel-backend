@@ -41,6 +41,7 @@ a{color:var(--green);font-weight:500}
 .av{width:48px;height:48px;border-radius:50%;object-fit:cover;float:inline-start;margin-inline-end:10px}
 .idimg{width:100%;border-radius:8px;margin-top:8px}
 .selfie{width:120px;height:120px;object-fit:cover;border-radius:50%;margin-top:8px;display:block}
+.bad{color:var(--red);font-weight:800}
 </style></head><body>
 <header><h1 id="site">توصيل فلسطين</h1></header>
 <nav id="tabs"><button data-t="c" class="on">زبون</button><button data-t="d">سائق</button></nav>
@@ -48,6 +49,20 @@ a{color:var(--green);font-weight:500}
 <div class="note" id="banner" hidden></div>
 
 <section id="c" class="on">
+<div id="c_auth">
+<h2>تسجيل الدخول</h2>
+<label>اسم المستخدم</label><input id="u_user" autocomplete="username">
+<label>كلمة المرور</label><input id="u_pass" type="password" autocomplete="current-password">
+<button class="go alt" data-go="ulogin">تسجيل الدخول</button>
+<h2 style="margin-top:26px">مستخدم جديد</h2>
+<label>اسم المستخدم</label><input id="g_user" autocomplete="username">
+<label>كلمة المرور</label><input id="g_pass" type="password" autocomplete="new-password">
+<label>تأكيد كلمة المرور</label><input id="g_pass2" type="password" autocomplete="new-password">
+<button class="go" data-go="uregister">إنشاء حساب</button>
+<div class="note">اسم المستخدم من 3 إلى 30 حرفاً (حروف وأرقام و _ و .). كلمة المرور 8 أحرف فأكثر.</div>
+</div>
+<div id="c_app" hidden>
+<div class="row"><h2 id="c_hi"></h2><button class="b x" data-go="ulogout" style="flex:0 0 auto">خروج</button></div>
 <h2>اطلب توصيل</h2>
 <label>اسمك</label><input id="c_name">
 <label>رقم الجوال</label><input id="c_phone" type="tel" inputmode="tel">
@@ -58,6 +73,7 @@ a{color:var(--green);font-weight:500}
 <button class="go" data-go="order">أرسل الطلب</button>
 <h3>طلباتي</h3>
 <div id="c_list"></div>
+</div>
 </section>
 
 <section id="d">
@@ -84,6 +100,14 @@ a{color:var(--green);font-weight:500}
 <div id="d_dash" hidden>
 <div class="row"><h2 id="d_hi"></h2><button class="b x" data-go="logout" style="flex:0 0 auto">خروج</button></div>
 <div id="d_body"></div>
+<div id="d_pay" hidden>
+<h3>سداد العمولة</h3>
+<div id="d_acc"></div>
+<label>المبلغ الذي حوّلته (₪)</label><input id="p_amt" type="number" min="0" step="0.01">
+<label>رقم العملية أو ملاحظة (اختياري)</label><input id="p_ref" maxlength="60">
+<label>صورة إشعار الدفع</label><input id="p_img" type="file" accept="image/*"><img id="p_prev" class="idp" alt="" hidden>
+<button class="go" data-go="paysend">إرسال الإشعار للمشرف</button>
+</div>
 </div>
 </section>
 
@@ -92,8 +116,8 @@ a{color:var(--green);font-weight:500}
 <div id="a_dash" hidden>
 <div class="row"><h2>لوحة المشرف</h2><button class="b x" data-go="alogout" style="flex:0 0 auto">خروج</button></div>
 <label>كلمة السر لتأكيد العمليات المالية (العمولة، الأسعار، المناطق، التسوية، الحذف)</label><input id="k_pw" type="password" autocomplete="off">
-<div id="a_stats"></div><div id="a_octl"></div><div id="a_orders"></div>
-<h3>السائقون</h3><div id="a_drivers"></div><div id="a_cfg"></div><div id="a_audit"></div>
+<div id="a_stats"></div><div id="a_report"></div><div id="a_octl"></div><div id="a_orders"></div>
+<div id="a_pay"></div><h3>السائقون</h3><div id="a_drivers"></div><h3>العملاء</h3><div id="a_users"></div><div id="a_cfg"></div><div id="a_audit"></div>
 </div></section>
 </main>
 <div id="toast"></div>

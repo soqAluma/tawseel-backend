@@ -3,14 +3,16 @@ const MAX_ACTIVE = 2, EXPIRED = 'انتهت الجلسة، سجّل الدخول
 const COLS = {
   regions: ['id', 'name', 'grp', 'price'],
   drivers: ['id', 'name', 'phone', 'salt', 'hash', 'veh', 'scope', 'approved', 'banned', 'online', 'paid', 'due_at', 'created_at', 'idFile', 'selfieFile'],
-  orders: ['id', 'secret', 'cname', 'cphone', 'region', 'addr', 'note', 'status', 'driver_id', 'merchant_id', 'items', 'items_total', 'mcommission', 'price', 'commission', 'total', 'rating', 'created_at', 'done_at'],
+  orders: ['id', 'secret', 'cname', 'cphone', 'region', 'addr', 'note', 'status', 'driver_id', 'merchant_id', 'items', 'items_total', 'mcommission', 'price', 'commission', 'total', 'rating', 'created_at', 'done_at', 'user_id'],
+  users: ['id', 'username', 'salt', 'hash', 'banned', 'created_at'],
   settings: ['k', 'v'], blocked: ['phone'], sessions: ['hash', 'role', 'user_id', 'exp'], audit: ['at', 'who', 'action', 'detail'],
   merchants: ['id', 'name', 'shop', 'cat', 'phone', 'salt', 'hash', 'region', 'addr', 'idFile', 'pref_driver', 'paid', 'due_at', 'approved', 'banned', 'created_at'],
   products: ['id', 'merchant_id', 'name', 'price', 'descr', 'avail', 'created_at'], product_imgs: ['product_id', 'img'],
   payments: ['id', 'role', 'user_id', 'who', 'amount', 'receiptFile', 'ref', 'status', 'note', 'approved_amount', 'created_at', 'decided_at'],
-  notices: ['id', 'role', 'user_id', 'day', 'text', 'at']
+  notices: ['id', 'role', 'user_id', 'day', 'text', 'at'],
+  pay_accounts: ['id', 'type', 'name', 'number', 'note', 'active']
 };
-const WRITES = ['createOrder', 'cancel', 'rate', 'register', 'login', 'logout', 'toggle', 'accept', 'pick', 'done', 'return', 'adminLogin', 'adminLogout', 'adminAct'];
+const WRITES = ['createOrder', 'cancel', 'rate', 'register', 'login', 'logout', 'toggle', 'accept', 'pick', 'done', 'return', 'adminLogin', 'adminLogout', 'adminAct', 'adminKyc', 'adminReceipt', 'pay', 'uRegister', 'uLogin', 'uLogout'];
 const BASE = [['g-شمال غزة', 'شمال غزة', 'gaza'], ['g-غزة', 'غزة', 'gaza'], ['g-دير البلح', 'دير البلح', 'gaza'], ['g-خان يونس', 'خان يونس', 'gaza'], ['g-رفح', 'رفح', 'gaza'],
   ['w-جنين', 'جنين', 'wb'], ['w-طوباس', 'طوباس', 'wb'], ['w-طولكرم', 'طولكرم', 'wb'], ['w-نابلس', 'نابلس', 'wb'], ['w-قلقيلية', 'قلقيلية', 'wb'], ['w-سلفيت', 'سلفيت', 'wb'],
   ['w-رام الله والبيرة', 'رام الله والبيرة', 'wb'], ['w-أريحا والأغوار', 'أريحا والأغوار', 'wb'], ['w-القدس', 'القدس', 'wb'], ['w-بيت لحم', 'بيت لحم', 'wb'], ['w-الخليل', 'الخليل', 'wb']];
@@ -111,6 +113,17 @@ function me() {
   const d = rows('drivers').find((x) => x.id === s.user_id); if (!d || d.banned === 'Y') throw bad(EXPIRED);
   return d;
 }
+function customer() {
+  const s = getSession(TK.customer, 'customer'); if (!s) throw bad(EXPIRED);
+  const u = rows('users').find((x) => x.id === s.user_id); if (!u || u.banned === 'Y') throw bad(EXPIRED);
+  return u;
+}
+function ownOrder(b) {   // صاحب الطلب: برمزه السري (قديم) أو بحسابه المسجَّل
+  if (b.secret) return rows('orders').find((x) => x.id === b.id && x.secret === clean(b.secret));
+  const u = customer(); return rows('orders').find((x) => x.id === b.id && x.user_id === u.id);
+}
+const customerView = (o, ds) => { const d = ds.find((x) => x.id === o.driver_id), live = ['accepted', 'picked', 'done'].indexOf(o.status) >= 0;
+  return Object.assign(pubOrder(o), { total: +o.total, delivery: r2(+o.price + +o.commission), rating: ratingOf(o), shop: null, driver: d && live ? { name: d.name, phone: d.phone } : null, proposal: null }); };
 function needAdmin() { if (!getSession(TK.admin, 'admin')) throw bad(EXPIRED); }
 function needPassword(b) {
   locked('a:' + IP, 5);
@@ -138,9 +151,40 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 function withLock(fn) { const l = LockService.getScriptLock(); l.waitLock(25000); try { return fn(); } finally { l.releaseLock(); } }
-function setup() { Object.keys(COLS).forEach(sh); regionsAll(); folder(); Logger.log('تم الإعداد: أُنشئت الجداول وبُذرت المناطق وجُهّز مجلد الصور الخاص.'); }
+function setup() { Object.keys(COLS).forEach((n) => { sh(n).getRange(1, 1, 1, COLS[n].length).setValues([COLS[n]]); }); regionsAll(); folder(); Logger.log('تم الإعداد: أُنشئت الجداول وبُذرت المناطق وجُهّز مجلد الصور الخاص.'); }
 
-const SENS = ['setCommission', 'setPrice', 'addRegion', 'delRegion', 'settle', 'delDriver', 'delMerchant', 'setMerchantCommission', 'settleMerchant', 'payOk', 'setDebtPolicy'];
+/* ---------- تحصيل العمولة: المهلة والإشعارات والإيقاف ---------- */
+function owedOf(role, u) { const f = role === 'driver' ? 'commission' : 'mcommission', col = role === 'driver' ? 'driver_id' : 'merchant_id'; return r2(sum(rows('orders').filter((o) => o[col] === u.id && o.status === 'done'), f) - Number(u.paid)); }
+// تبدأ المهلة عند أول تجاوز لحد العمولة وتنتهي بالدفع؛ بعد انتهائها يُوقف الحساب عن العمل ويبقى دخوله مفتوحاً للدفع
+function syncDue(role, u, s, owed) {
+  const tbl = role === 'driver' ? 'drivers' : 'merchants', over = s.debtLimit > 0 && owed >= s.debtLimit;
+  let due = u.due_at ? new Date(u.due_at) : null;
+  if (over && !due) { due = new Date(Date.now() + s.graceDays * 86400000); upd(tbl, u, { due_at: due.toISOString() }); }
+  else if (!over && due) { due = null; upd(tbl, u, { due_at: '' }); }
+  return due;
+}
+function debtInfo(role, u, s, owed) {
+  if (!(s.debtLimit > 0) && !u.due_at && !(owed > 0)) return null;
+  const tbl = role === 'driver' ? 'drivers' : 'merchants', today = day(Date.now()), over = s.debtLimit > 0 && owed >= s.debtLimit;
+  const keyOf = (d) => (d && new Date(d).getTime() < Date.now() ? today + '-s' : today);   // تذكير يومي + إشعار إيقاف منفصل
+  const mine = () => rows('notices').filter((n) => n.user_id === u.id);
+  if ((over && !u.due_at) || (!over && u.due_at) || (over && !mine().some((n) => n.day === keyOf(u.due_at)))) withLock(() => {
+    MEM = {}; const u2 = rows(tbl).find((x) => x.id === u.id); if (!u2) return;
+    const due = syncDue(role, u2, s, owed); u.due_at = u2.due_at;
+    const key = keyOf(due && due.toISOString());
+    if (due && !mine().some((n) => n.day === key)) {   // إشعار واحد كل يوم طوال المهلة، ثم إشعار الإيقاف
+      const suspended = due.getTime() < Date.now(), left = Math.ceil((due.getTime() - Date.now()) / 86400000);
+      ins('notices', { id: Utilities.getUuid(), role, user_id: u.id, day: key, at: now(), text: suspended ? 'تم إيقاف حسابك لعدم سداد العمولة المستحقة (' + owed + ' ₪). ادفعها وارفع صورة الإشعار ليُعاد تفعيله.' : 'عليك عمولة ' + owed + ' ₪ تجاوزت الحد (' + s.debtLimit + ' ₪). ادفعها وارفع صورة الإشعار خلال ' + left + ' يوم وإلا يُوقف حسابك.' });
+    }
+  });
+  const due = u.due_at ? new Date(u.due_at) : null;
+  return { owed, limit: s.debtLimit, days: s.graceDays, due: due ? due.toISOString() : null, left: due ? Math.ceil((due.getTime() - Date.now()) / 86400000) : null, suspended: !!due && due.getTime() < Date.now(),
+    notices: mine().slice(-4).reverse().map((n) => ({ day: n.day, text: n.text })),
+    payments: rows('payments').filter((p) => p.user_id === u.id).slice(-4).reverse().map((p) => ({ amount: +p.amount, status: p.status, note: p.note, created_at: p.created_at })),
+    accounts: rows('pay_accounts').filter((a) => a.active === 'Y').map((a) => ({ type: a.type, name: a.name, number: a.number, note: a.note })) };
+}
+
+const SENS = ['setCommission', 'setPrice', 'addRegion', 'delRegion', 'settle', 'delDriver', 'delMerchant', 'setMerchantCommission', 'settleMerchant', 'payOk', 'setDebtPolicy', 'addAccount', 'delAccount'];
 
 function route(b) {
   const A = b.action;
@@ -153,6 +197,7 @@ function route(b) {
     return { regions: rs.map((r) => ({ id: r.id, name: r.name, group: r.grp, total: r2(+r.price + fee(+r.price, s)) })), paused: s.paused, notice: s.notice, site: s.siteName };
   }
   if (A === 'createOrder') {
+    const cu = customer();   // الطلب يتطلب حساباً مسجَّلاً
     const n = str(b.cname, 80, 'اكتب اسمك'), p = clean(b.cphone), ad = str(b.addr, 200, 'اكتب العنوان'), rg = clean(b.region);
     if (!phoneOk(p)) throw bad('رقم الجوال غير صحيح');
     hit('o:' + IP, 60, 3600); hit('op:' + normPhone(p), 10, 3600);
@@ -160,7 +205,7 @@ function route(b) {
     if (rows('blocked').some((x) => x.phone === normPhone(p))) throw bad('لا يمكن استقبال طلب من هذا الرقم');
     const r = regionsAll().find((x) => x.id === rg); if (!r) throw bad('منطقة غير صحيحة');
     const price = +r.price, c = r2(fee(price, s)), id = Utilities.getUuid(), secret = rnd().slice(0, 16);
-    ins('orders', { id, secret, cname: n, cphone: p, region: rg, addr: ad, note: clean(b.note).slice(0, 300), status: 'new', items_total: '0', mcommission: '0', price, commission: c, total: r2(price + c), created_at: now() });
+    ins('orders', { id, secret, cname: n, cphone: p, region: rg, addr: ad, note: clean(b.note).slice(0, 300), status: 'new', items_total: '0', mcommission: '0', price, commission: c, total: r2(price + c), created_at: now(), user_id: cu.id });
     return { id, secret, total: r2(price + c) };
   }
   if (A === 'track') {   // لا يرى الطلب إلا من يملك رمزه السري
@@ -170,15 +215,42 @@ function route(b) {
       return Object.assign(pubOrder(o), { total: +o.total, delivery: r2(+o.price + +o.commission), rating: ratingOf(o), shop: null, driver: d && live ? { name: d.name, phone: d.phone } : null, proposal: null }); }) };
   }
   if (A === 'cancel') {
-    const o = rows('orders').find((x) => x.id === b.id && x.secret === clean(b.secret));
+    const o = ownOrder(b);
     if (!o || ['new', 'm_new', 'offer', 'd_offer'].indexOf(o.status) < 0) throw bad('لا يمكن الإلغاء بعد قبول السائق');
     upd('orders', o, { status: 'cancelled' }); return { ok: true };
   }
   if (A === 'rate') {
     const n = Number(b.n); if ([1, 2, 3, 4, 5].indexOf(n) < 0) throw bad('تقييم غير صحيح');
-    const o = rows('orders').find((x) => x.id === b.id && x.secret === clean(b.secret));
+    const o = ownOrder(b);
     if (!o || o.status !== 'done' || o.rating) throw bad('لا يمكن التقييم');
     upd('orders', o, { rating: String(n) }); return { ok: true };
+  }
+
+  /* ===== حساب الزبون ===== */
+  if (A === 'uRegister') {
+    hit('ur:' + IP, 20, 3600);
+    const un = clean(b.username), pw = String(b.pass || '');
+    if (!/^[A-Za-z0-9_.\u0600-\u06FF]{3,30}$/.test(un)) throw bad('اسم المستخدم من 3 إلى 30 حرفاً (حروف وأرقام و _ و .)');
+    if (pw.length < 8 || pw.length > 100) throw bad('كلمة المرور 8 أحرف على الأقل');
+    if (pw !== String(b.pass2 || '')) throw bad('كلمتا المرور غير متطابقتين');
+    const key = un.toLowerCase();
+    if (rows('users').some((x) => x.username === key)) throw bad('اسم المستخدم مستخدم من قبل');
+    const id = Utilities.getUuid(), salt = rnd().slice(0, 16);
+    ins('users', { id, username: key, salt, hash: hashPw(pw, salt), banned: 'N', created_at: now() });
+    return { username: key, _c: [{ n: 'su', v: newSession('customer', id, 7 * 86400), age: 7 * 86400 }] };
+  }
+  if (A === 'uLogin') {
+    const un = clean(b.username).toLowerCase(), k = 'u:' + un, k2 = 'i:' + IP;
+    locked(k, 8); locked(k2, 40);
+    const u = rows('users').find((x) => x.username === un && x.banned !== 'Y');
+    const okPw = same(hashPw(String(b.pass || ''), u ? u.salt : 'x'), u ? u.hash : 'y');   // نفس الزمن سواء وُجد المستخدم أم لا
+    if (!u || !okPw) { bump(k, 900); bump(k2, 900); throw bad('اسم المستخدم أو كلمة المرور غير صحيحة'); }
+    return { username: u.username, _c: [{ n: 'su', v: newSession('customer', u.id, 7 * 86400), age: 7 * 86400 }] };
+  }
+  if (A === 'uLogout') { endSession(TK.customer); return { ok: true, _c: [{ n: 'su', v: '', age: 0 }] }; }
+  if (A === 'myOrders') {
+    const u = customer(), ds = rows('drivers');
+    return { username: u.username, orders: rows('orders').filter((o) => o.user_id === u.id).reverse().slice(0, 50).map((o) => customerView(o, ds)) };
   }
 
   /* ===== السائق ===== */
@@ -208,16 +280,18 @@ function route(b) {
     const mine = os.filter((o) => o.driver_id === d.id && ['accepted', 'picked'].indexOf(o.status) >= 0);
     const dn = os.filter((o) => o.driver_id === d.id && o.status === 'done').sort((a, c) => (c.done_at > a.done_at ? 1 : -1));
     const news = os.filter((o) => o.status === 'new' && covers(d.scope, o.region, gm)).reverse(), on = d.online === 'Y';
-    return { approved: true, name: d.name, scope: d.scope, online: on, max: MAX_ACTIVE,
+    const debt = debtInfo('driver', d, getSet(), r2(sum(dn, 'commission') - Number(d.paid)));
+    return { approved: true, name: d.name, scope: d.scope, online: on, max: MAX_ACTIVE, debt,
       stats: { n: dn.length, today: dn.filter((o) => o.done_at && day(o.done_at) === today).length, earn: r2(sum(dn, 'price')), owed: r2(sum(dn, 'commission') - Number(d.paid)), avg: avgOf(dn) },
       history: dn.slice(0, 8).map((o) => ({ region: o.region, addr: o.addr, price: +o.price, rating: ratingOf(o) })),
       mine: mine.map((o) => Object.assign(pubOrder(o), { cname: o.cname, cphone: o.cphone, price: +o.price, commission: +o.commission, total: +o.total })),
-      offers: [], available: on ? news.map((o) => Object.assign(pubOrder(o), { price: +o.price })) : [] };
+      offers: [], available: on && !(debt && debt.suspended) ? news.map((o) => Object.assign(pubOrder(o), { price: +o.price })) : [] };
   }
   if (A === 'toggle') { const d = me(); upd('drivers', d, { online: d.online === 'Y' ? 'N' : 'Y' }); return { ok: true }; }
   if (A === 'accept') {
     const d = me(), os = rows('orders'), o = os.find((x) => x.id === b.id);
     if (d.approved !== 'Y' || d.online !== 'Y') throw bad('لا يمكنك قبول الطلبات الآن (تأكد أنك معتمد ومتاح)');
+    const st0 = getSet(); if (st0.debtLimit > 0 || d.due_at) { const due = syncDue('driver', d, st0, owedOf('driver', d)); if (due && due.getTime() < Date.now()) throw bad('حسابك موقوف بسبب عمولة مستحقة. ادفع وارفع صورة الإشعار من لوحتك.'); }
     if (!o) throw bad('الطلب غير موجود');
     if (!covers(d.scope, o.region, GM())) throw bad('الطلب خارج منطقتك');
     if (os.filter((x) => x.driver_id === d.id && ['accepted', 'picked'].indexOf(x.status) >= 0).length >= MAX_ACTIVE) throw bad('أنهِ طلباتك الحالية أولاً');
@@ -231,6 +305,16 @@ function route(b) {
     if (A === 'pick') upd('orders', o, { status: 'picked' });
     else if (A === 'done') upd('orders', o, { status: 'done', done_at: now() });
     else upd('orders', o, { status: 'new', driver_id: '' });
+    return { ok: true };
+  }
+
+  if (A === 'pay') {   // رفع صورة إشعار الدفع
+    const u = me(); hit('pay:' + u.id, 6, 21600);
+    const owed = owedOf('driver', u);
+    if (!(owed > 0)) throw bad('لا توجد عمولة مستحقة عليك');
+    if (rows('payments').filter((p) => p.user_id === u.id && p.status === 'pending').length >= 2) throw bad('لديك إيصالات قيد المراجعة، انتظر قرار المشرف');
+    const f = saveImg(b.receipt, 'receipt-' + rnd().slice(0, 8));
+    ins('payments', { id: Utilities.getUuid(), role: 'driver', user_id: u.id, who: u.name, amount: b.amount ? num(b.amount, 1000000) : owed, receiptFile: f, ref: clean(b.ref).slice(0, 60), status: 'pending', created_at: now() });
     return { ok: true };
   }
 
@@ -255,13 +339,33 @@ function route(b) {
 
   if (A === 'adminState') {
     needAdmin();
-    const ds = rows('drivers'), os = rows('orders'), dn = os.filter((o) => o.status === 'done');
-    return { settings: getSet(), blocked: rows('blocked').map((x) => x.phone), merchants: [], payments: [],
+    const st = getSet();
+    if (st.debtLimit > 0 || rows('drivers').some((d) => d.due_at)) {   // يضبط مهل المتأخرين دفعة واحدة
+      const need = rows('drivers').filter((d) => { const ow = owedOf('driver', d), over = st.debtLimit > 0 && ow >= st.debtLimit; return (over && !d.due_at) || (!over && d.due_at); });
+      if (need.length) withLock(() => { MEM = {}; rows('drivers').forEach((d) => syncDue('driver', d, st, owedOf('driver', d))); });
+    }
+    const ds = rows('drivers'), os = rows('orders'), dn = os.filter((o) => o.status === 'done'), pays = rows('payments'), okp = pays.filter((p) => p.status === 'approved');
+    const drivers = ds.map((d) => { const x = dn.filter((o) => o.driver_id === d.id); return { id: d.id, name: d.name, phone: d.phone, veh: d.veh, scope: d.scope, approved: d.approved === 'Y', banned: d.banned === 'Y', online: d.online === 'Y', paid: +d.paid, n: x.length, avg: avgOf(x), owed: r2(sum(x, 'commission') - Number(d.paid)), due_at: d.due_at || null }; });
+    const today = day(Date.now()), month = today.slice(0, 7), within = (list, k, pre) => list.filter((x) => x[k] && day(x[k]).indexOf(pre) === 0);
+    const earn = (list) => r2(sum(list, 'commission') + sum(list, 'mcommission'));
+    const report = { earned: earn(dn), earnedDelivery: r2(sum(dn, 'commission')), earnedMerchants: r2(sum(dn, 'mcommission')), received: r2(sum(okp, 'approved_amount')),
+      earnedToday: earn(within(dn, 'done_at', today)), earnedMonth: earn(within(dn, 'done_at', month)),
+      receivedToday: r2(sum(within(okp, 'decided_at', today), 'approved_amount')), receivedMonth: r2(sum(within(okp, 'decided_at', month), 'approved_amount')),
+      outstanding: r2(drivers.reduce((a, d) => a + Math.max(0, d.owed), 0)), pending: pays.filter((p) => p.status === 'pending').length, payers: new Set(okp.map((p) => p.user_id)).size };
+    return { settings: st, blocked: rows('blocked').map((x) => x.phone), merchants: [], report,
+      users: rows('users').slice(-100).reverse().map((u) => ({ id: u.id, username: u.username, banned: u.banned === 'Y', n: os.filter((o) => o.user_id === u.id).length, created_at: u.created_at })),
+      accounts: rows('pay_accounts').map((a) => ({ id: a.id, type: a.type, name: a.name, number: a.number, note: a.note, active: a.active === 'Y' })),
+      payments: pays.slice(-50).reverse().map((p) => ({ id: p.id, role: p.role, who: p.who, amount: +p.amount, status: p.status, note: p.note, approved_amount: p.approved_amount ? +p.approved_amount : null, created_at: p.created_at, hasReceipt: !!p.receiptFile })),
       audit: rows('audit').slice(-30).reverse().map((a) => { let det = {}; try { det = JSON.parse(a.detail); } catch (e) { } return { at: a.at, who: a.who, action: a.action, detail: det }; }),
-      regions: regionsAll().map((r) => ({ id: r.id, name: r.name, group: r.grp, price: +r.price })),
-      drivers: ds.map((d) => { const x = dn.filter((o) => o.driver_id === d.id); return { id: d.id, name: d.name, phone: d.phone, veh: d.veh, scope: d.scope, approved: d.approved === 'Y', banned: d.banned === 'Y', online: d.online === 'Y', paid: +d.paid, n: x.length, avg: avgOf(x), owed: r2(sum(x, 'commission') - Number(d.paid)), due_at: d.due_at || null }; }),
+      regions: regionsAll().map((r) => ({ id: r.id, name: r.name, group: r.grp, price: +r.price })), drivers,
       orders: os.slice(-200).reverse().map((o) => Object.assign(pubOrder(o), { cname: o.cname, cphone: o.cphone, driver_id: o.driver_id || null, shop: null, price: +o.price, commission: +o.commission, total: +o.total, rating: ratingOf(o) })),
       totals: { n: dn.length, price: r2(sum(dn, 'price')), commission: r2(sum(dn, 'commission')), mcommission: r2(sum(dn, 'mcommission')) } };
+  }
+  if (A === 'adminReceipt') {   // صورة إيصال الدفع: لا تخرج إلا هنا، وكل مشاهدة تُسجّل
+    needAdmin();
+    const p = rows('payments').find((x) => x.id === b.id);
+    audit('admin', 'view_receipt', { payment: b.id });
+    return { receipt: p ? readImg(p.receiptFile) : null };
   }
   if (A === 'adminKyc') {   // صورة الهوية والصورة الشخصية: لا تخرج إلا هنا، وكل مشاهدة تُسجّل
     needAdmin();
@@ -284,7 +388,27 @@ function route(b) {
       const d = drv(); requeue(d.id, ['accepted', 'picked']); killSessions((r) => r.user_id === d.id);
       trash(d.idFile); trash(d.selfieFile); delRows('drivers', [d]);
     }
-    else if (op === 'settle') { const d = drv(); upd('drivers', d, { paid: String(r2(sum(rows('orders').filter((o) => o.driver_id === d.id && o.status === 'done'), 'commission'))), due_at: '' }); }
+    else if (op === 'settle') {   // تسوية يدوية (استلمت المبلغ نقداً): تُسجّل في سجل المدفوعات
+      const d = drv(), total = r2(sum(rows('orders').filter((o) => o.driver_id === d.id && o.status === 'done'), 'commission')), delta = r2(total - Number(d.paid));
+      if (delta > 0) ins('payments', { id: Utilities.getUuid(), role: 'driver', user_id: d.id, who: d.name, amount: String(delta), receiptFile: '', ref: 'تسوية يدوية', status: 'approved', note: 'سجّلها المشرف يدوياً', approved_amount: String(delta), created_at: now(), decided_at: now() });
+      upd('drivers', d, { paid: String(total), due_at: '' });
+    }
+    else if (op === 'banUser' || op === 'unbanUser') {
+      const u = rows('users').find((x) => x.id === b.id); if (!u) throw bad('المستخدم غير موجود');
+      upd('users', u, { banned: op === 'banUser' ? 'Y' : 'N' }); if (op === 'banUser') killSessions((r) => r.user_id === u.id);
+    }
+    else if (op === 'payOk') {   // اعتماد إيصال: يُضاف المبلغ لمدفوعات الحساب وتُلغى المهلة إن نزلت العمولة تحت الحد
+      const p = rows('payments').find((x) => x.id === b.id && x.status === 'pending'); if (!p) throw bad('الإيصال غير موجود أو تمت مراجعته');
+      const amt = (b.amount === undefined || b.amount === '') ? Number(p.amount) : num(b.amount, 1000000);
+      const tbl = p.role === 'driver' ? 'drivers' : 'merchants', u = rows(tbl).find((x) => x.id === p.user_id); if (!u) throw bad('الحساب غير موجود');
+      const paid = r2(Number(u.paid) + amt), owed = r2(owedOf(p.role, u) + Number(u.paid) - paid), st = getSet();
+      upd(tbl, u, { paid: String(paid), due_at: (st.debtLimit > 0 && owed >= st.debtLimit) ? u.due_at : '' });
+      upd('payments', p, { status: 'approved', approved_amount: String(amt), decided_at: now() });
+    }
+    else if (op === 'payNo') { const p = rows('payments').find((x) => x.id === b.id && x.status === 'pending'); if (!p) throw bad('الإيصال غير موجود أو تمت مراجعته'); upd('payments', p, { status: 'rejected', note: clean(b.note).slice(0, 200), decided_at: now() }); }
+    else if (op === 'setDebtPolicy') { const days = Math.floor(Number(b.days)); if (!(days >= 1 && days <= 30)) throw bad('عدد الأيام بين 1 و30'); setSet('debt_limit', num(b.limit, 1000000)); setSet('grace_days', days); }
+    else if (op === 'addAccount') ins('pay_accounts', { id: 'a-' + rnd().slice(0, 8), type: str(b.type, 40, 'اختر نوع الحساب'), name: str(b.name, 60, 'اكتب اسم صاحب الحساب'), number: str(b.number, 40, 'اكتب رقم الحساب أو المحفظة'), note: clean(b.note).slice(0, 120), active: 'Y' });
+    else if (op === 'delAccount') delRows('pay_accounts', rows('pay_accounts').filter((a) => a.id === clean(b.id)));
     else if (op === 'cancelOrder') { const o = rows('orders').find((x) => x.id === b.id); if (o && ['new', 'm_new', 'offer', 'd_offer', 'accepted', 'picked'].indexOf(o.status) >= 0) upd('orders', o, { status: 'cancelled' }); }
     else if (op === 'requeue') { const o = rows('orders').find((x) => x.id === b.id); if (o && ['accepted', 'picked'].indexOf(o.status) >= 0) upd('orders', o, { status: 'new', driver_id: '' }); }
     else if (op === 'setCommission') {
