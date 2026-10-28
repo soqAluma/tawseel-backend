@@ -10,10 +10,10 @@ const money=n=>(+n).toLocaleString('en',{maximumFractionDigits:2})+' ₪';
 const wa=p=>'https://wa.me/'+norm(p).replace(/^0/,'970');
 const stars=n=>'★'.repeat(n)+'☆'.repeat(5-n);
 const okImg=x=>typeof x==='string'&&/^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(x);
-let tab='c',R=[],CO=[],ADM=null,adminName='',KY={},stream=null,selfie=null,idImg=null,busy=false,again=false,tick=0,payImg=null,RC={};
+let tab='c',R=[],CO=[],ADM=null,adminName='',KY={},stream=null,selfie=null,idImg=null,busy=false,again=false,tick=0,payImg=null,RC={},proxId=null,scanOn=false,seenL=null,seenMap={},proxWarned=false,CL=null,geoId=null,lastSend=0,GEOST='';
 const reg=id=>R.find(r=>r.id===id);
 const scopeName=v=>v==="ALL:gaza"?"قطاع غزة كله":v==="ALL:wb"?"الضفة كلها":(reg(v)?.name||"—");
-const mapUrl=o=>'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(o.addr+' '+(reg(o.region)?.name||'')+' فلسطين');
+const mapUrl=o=>(o.lat!=null&&o.lng!=null)?'https://www.google.com/maps/search/?api=1&query='+Number(o.lat)+','+Number(o.lng):'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(o.addr+' '+(reg(o.region)?.name||'')+' فلسطين');
 
 function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',3500)}
 async function api(action,data={}){let j;
@@ -30,6 +30,21 @@ function fillSelects(){const a=$('c_region').value,b=$('r_scope').value;$('c_reg
 function showPrice(){const r=reg($('c_region').value),e=$('c_price');e.hidden=!r;if(r)e.textContent='سعر التوصيل: '+money(r.total)+' (يُدفع نقداً للسائق)'}
 function showTab(t){if(t!=='d')camStop();tab=t;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.t===t));document.querySelectorAll('section').forEach(x=>x.classList.toggle('on',x.id===t));if(t==='c')run(loadRegions);refresh()}
 
+const prox=()=>window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Proximity;   // موجودة داخل تطبيق أندرويد فقط
+async function proxCustomer(){const P=prox();if(!P)return;
+ const act=CO.find(o=>['accepted','picked'].includes(o.status));
+ try{if(act){if(proxId!==act.id){const t=await api('proxToken',{id:act.id});await P.start({role:'customer',token:t.token});proxId=act.id}}
+  else if(proxId){await P.stop();proxId=null}}catch(e){proxId=null;if(!proxWarned){proxWarned=true;toast('التحقق بالبلوتوث: '+(e.message||'فعّل البلوتوث والصلاحيات'))}}}
+async function proxDriver(on){const P=prox();if(!P)return;
+ try{if(on&&!scanOn){await P.start({role:'driver'});scanOn=true;if(!seenL)seenL=await P.addListener('seen',onSeen)}
+  else if(!on&&scanOn){await P.stop();scanOn=false}}catch(e){scanOn=false;if(!proxWarned){proxWarned=true;toast('التحقق بالبلوتوث: '+(e.message||'فعّل البلوتوث والصلاحيات'))}}}
+function onSeen(e){if(!e||typeof e.token!=='string'||e.rssi<-85)return;const t=Date.now(),s=seenMap[e.token]||(seenMap[e.token]={n:0,t:0,sent:0});
+ if(t-s.t>20000)s.n=0;s.n++;s.t=t;   // لا نبلّغ إلا بعد سماع الجهاز 3 مرات خلال 20 ثانية وبإشارة قوية
+ if(s.n>=3&&t-s.sent>15000){s.sent=t;api('proxSeen',{tokens:[{token:e.token,rssi:e.rssi}]}).then(()=>refresh()).catch(()=>{})}}
+function startGeo(){if(geoId!==null||!navigator.geolocation)return;GEOST='wait';
+ geoId=navigator.geolocation.watchPosition(p=>{GEOST='ok';if(Date.now()-lastSend<20000)return;lastSend=Date.now();api('loc',{lat:p.coords.latitude,lng:p.coords.longitude}).catch(()=>{})},e=>{GEOST=e.code===1?'denied':'err'},{enableHighAccuracy:false,maximumAge:15000,timeout:30000})}
+function stopGeo(){if(geoId!==null){navigator.geolocation.clearWatch(geoId);geoId=null}GEOST=''}
+function geoLine(j){if(!j.online)return '📍 مشاركة الموقع متوقفة لأنك غير متاح.';if(GEOST==='denied')return '📍 لم تسمح بالموقع، فعّله من إعدادات المتصفح لترى الطلبات الأقرب إليك.';if(j.loc)return '📍 موقعك مشارك لعرض الأقرب إليك (يراه المشرف فقط).';return '📍 جارٍ تحديد موقعك…'}
 function renderDebt(d){const box=$('d_pay');
  if(!d||!(d.owed>0)){box.hidden=true;$('d_acc').innerHTML='';return}
  box.hidden=false;
@@ -45,35 +60,36 @@ function card(o,v){
  const links=p=>`<a href="tel:${esc(p)}">اتصال</a> <a href="${wa(p)}" target="_blank" rel="noopener noreferrer">واتساب</a>`;
  const map=`<a href="${mapUrl(o)}" target="_blank" rel="noopener noreferrer">الخريطة</a>`;
  let h=`<div class="item"><b>${esc(reg(o.region)?.name||"—")}</b>`+(o.status?` <span class="pill s-${o.status}">${AR[o.status]}</span>`:'')+`<div>${esc(o.addr)}</div>`+(o.note?`<div class="mute">${esc(o.note)}</div>`:'');
- if(v==='c'){h+=steps(o)+`<div class="mute">المبلغ: ${money(o.total)} نقداً للسائق</div>`;
+ if(v==='c'){h+=steps(o)+(o.near?`<div class="mute">✓ تم التحقق من وصول السائق إليك عبر البلوتوث</div>`:'')+`<div class="mute">المبلغ: ${money(o.total)} نقداً للسائق</div>`;
   if(o.driver)h+=`<div class="mute">السائق: ${esc(o.driver.name)} — ${links(o.driver.phone)}</div>`;
   if(o.status==='new')h+=B('cancel','إلغاء الطلب','x');
   if(o.status==='done')h+=o.rating?`<div class="mute">تقييمك: ${stars(o.rating)}</div>`:`<div class="stars">قيّم السائق: ${[1,2,3,4,5].map(n=>`<button data-act="rate" data-id="${esc(o.id)}" data-n="${n}">★${n}</button>`).join("")}</div>`;
   if(o.status==='done'||o.status==='cancelled')h+=B('again','اطلب مرة أخرى')}
- if(v==='v')h+=`<div class="mute">أجرتك: ${money(o.price)}</div>${map}<br>`+B('accept','قبول الطلب','p');
- if(v==='m'){h+=`<div class="mute">الزبون: ${esc(o.cname)} — ${links(o.cphone)} ${map}</div><div class="mute">تحصّل من الزبون ${money(o.total)} (منها عمولة المنصة ${money(o.commission)})</div>`;
+ if(v==='v')h+=`<div class="mute">أجرتك: ${money(o.price)}${o.dist!=null?' · يبعد '+o.dist+' كم':''}</div>${map}<br>`+B('accept','قبول الطلب','p');
+ if(v==='m'){h+=(o.near?`<div class="mute">✓ تم التحقق من قربك من الزبون عبر البلوتوث</div>`:'')+`<div class="mute">الزبون: ${esc(o.cname)} — ${links(o.cphone)} ${map}</div><div class="mute">تحصّل من الزبون ${money(o.total)} (منها عمولة المنصة ${money(o.commission)})</div>`;
   if(o.status==='accepted')h+=B('pick','استلمت الطلب','p')+B('return','إرجاع الطلب','x');
   if(o.status==='picked')h+=B('done','تم التوصيل','p')}
  if(v==='h')h+=`<div class="mute">أجرتك ${money(o.price)}${o.rating?' · '+stars(o.rating):''}</div>`;
  if(v==='a'){const d=ADM.drivers.find(x=>x.id===o.driver_id);
-  h+=`<div class="mute">الزبون: ${esc(o.cname)} ${esc(o.cphone)} · السائق: ${d?esc(d.name):"—"}</div><div class="mute">أصل ${money(o.price)} + عمولة ${money(o.commission)} = ${money(o.total)}${o.rating?' · '+stars(o.rating):''}</div>`;
+  h+=(o.near?`<div class="mute">✓ القرب مؤكد بالبلوتوث</div>`:'')+`<div class="mute">الزبون: ${esc(o.cname)} ${esc(o.cphone)} · السائق: ${d?esc(d.name):"—"}</div><div class="mute">أصل ${money(o.price)} + عمولة ${money(o.commission)} = ${money(o.total)}${o.rating?' · '+stars(o.rating):''}</div>`;
   if(o.status==='accepted'||o.status==='picked')h+=B('requeue','إعادة للطابور');
   if(!['done','cancelled'].includes(o.status))h+=B('acancel','إلغاء','x')}
  return h+"</div>"}
 
 async function renderC(){const on=ls.get('su',0);$('c_auth').hidden=!!on;$('c_app').hidden=!on;if(!on)return;
  let j;try{j=await api('myOrders')}catch(e){if(e.expired){ls.set('su',0);$('c_auth').hidden=false;$('c_app').hidden=true;toast(e.message);return}throw e}
- $('c_hi').textContent='أهلاً '+j.username;CO=j.orders;
+ $('c_hi').textContent='أهلاً '+j.username;CO=j.orders;proxCustomer();
  $('c_list').innerHTML=CO.length?CO.map(o=>card(o,'c')).join(""):`<p class="mute">لا توجد طلبات بعد.</p>`}
 
 async function renderD(){const on=ls.get('sd',0);$('d_auth').hidden=!!on;$('d_dash').hidden=!on;if(!on)return;
- let j;try{j=await api('driverState')}catch(e){if(e.expired){ls.set('sd',0);$('d_auth').hidden=false;$('d_dash').hidden=true;toast(e.message);return}throw e}
+ let j;try{j=await api('driverState')}catch(e){if(e.expired){stopGeo();proxDriver(false);ls.set('sd',0);$('d_auth').hidden=false;$('d_dash').hidden=true;toast(e.message);return}throw e}
  $('d_hi').textContent="أهلاً "+j.name;
- if(!j.approved){$('d_pay').hidden=true;$('d_body').innerHTML=`<div class="note">حسابك بانتظار موافقة المشرف. سترى الطلبات فور الموافقة.</div>`;return}
- const s=j.stats;renderDebt(j.debt);
+ if(!j.approved){stopGeo();proxDriver(false);$('d_pay').hidden=true;$('d_body').innerHTML=`<div class="note">حسابك بانتظار موافقة المشرف. سترى الطلبات فور الموافقة.</div>`;return}
+ const s=j.stats;renderDebt(j.debt);if(j.online&&!(j.debt&&j.debt.suspended))startGeo();else stopGeo();proxDriver(j.mine.length>0);
  $('d_body').innerHTML=`<div class="kpi"><div><b>${s.today}</b>اليوم</div><div><b>${s.n}</b>المكتملة</div><div><b>${s.avg??'—'}</b>تقييمك</div><div><b>${money(s.earn)}</b>أرباحك</div><div><b>${money(s.owed)}</b>عمولة عليك</div></div>
  <button class="go ${j.online?'alt':''}" data-go="toggle">${j.online?'أنت متاح — اضغط للإيقاف':'أنت غير متاح — اضغط للتفعيل'}</button>
- <div class="mute" style="margin-top:8px">منطقة عملك: ${esc(scopeName(j.scope))}</div>
+ <div class="mute" style="margin-top:8px">${geoLine(j)}</div>
+ <div class="mute">منطقة عملك: ${esc(scopeName(j.scope))}</div>
  <h3>طلباتي الحالية (${j.mine.length}/${j.max})</h3>${j.mine.map(o=>card(o,'m')).join("")||`<p class="mute">لا توجد طلبات حالية.</p>`}
  <h3>طلبات متاحة</h3>${j.online?(j.available.map(o=>card(o,'v')).join("")||`<p class="mute">لا توجد طلبات الآن، تتحدث القائمة تلقائياً.</p>`):`<p class="mute">فعّل حالة «متاح» لترى الطلبات.</p>`}
  <h3>آخر ما أنجزته</h3>${j.history.map(o=>card(o,'h')).join("")||`<p class="mute">لا يوجد بعد.</p>`}`}
@@ -115,7 +131,7 @@ function drawA(){if(!ADM)return;const os=ADM.orders,t=ADM.totals,cnt=s=>os.filte
  const list=os.filter(o=>(!f||o.status===f)&&(!q||o.cphone.includes(q)||o.cname.includes(q)));
  $('a_orders').innerHTML=list.map(o=>card(o,'a')).join("")||`<p class="mute">لا توجد طلبات.</p>`;
  const UB=(a,id,t,c='')=>`<button class="b ${c}" data-uact="${a}" data-id="${esc(id)}">${t}</button>`;
- const drv=u=>`<div class="item"><b>${esc(u.name)}</b>${u.banned?' <span class="pill s-cancelled">موقوف</span>':''}<div class="mute">${esc(u.phone)} · ${esc(u.veh)} · ${esc(scopeName(u.scope))}</div><div class="mute">مكتمل ${u.n} · تقييم ${u.avg??'—'} · عمولة مستحقة ${money(u.owed)}</div>${UB('kyc',u.id,KY[u.id]?'إخفاء الصور':'عرض الهوية والصورة')}${KY[u.id]?kycHtml(KY[u.id]):''}`;
+ const drv=u=>`<div class="item"><b>${esc(u.name)}</b>${u.banned?' <span class="pill s-cancelled">موقوف</span>':''}<div class="mute">${esc(u.phone)} · ${esc(u.veh)} · ${esc(scopeName(u.scope))}</div><div class="mute">مكتمل ${u.n} · تقييم ${u.avg??'—'} · عمولة مستحقة ${money(u.owed)}</div>${u.loc?`<div class="mute">📍 <a href="https://www.google.com/maps?q=${Number(u.loc.lat)},${Number(u.loc.lng)}" target="_blank" rel="noopener noreferrer">آخر موقع</a> · قبل ${u.loc.ago} ثانية</div>`:''}${UB('kyc',u.id,KY[u.id]?'إخفاء الصور':'عرض الهوية والصورة')}${KY[u.id]?kycHtml(KY[u.id]):''}`;
  const pend=ADM.drivers.filter(u=>!u.approved);
  $('a_drivers').innerHTML=(pend.length?`<div class="mute">بانتظار الموافقة (${pend.length})</div>`+pend.map(u=>drv(u)+UB('approve',u.id,'موافقة','p')+UB('delDriver',u.id,'رفض','x')+"</div>").join(""):"")+
   (ADM.drivers.filter(u=>u.approved).map(u=>drv(u)+(u.owed>0?UB('settle',u.id,'تسجيل استلام العمولة','p'):'')+UB(u.banned?'unban':'ban',u.id,u.banned?'إلغاء الإيقاف':'إيقاف','x')+UB('delDriver',u.id,'حذف','x')+"</div>").join("")||`<p class="mute">لا يوجد سائقون معتمدون.</p>`);
@@ -155,18 +171,24 @@ function shrink(src,max){return new Promise((ok,no)=>{const i=new Image();i.onlo
 
 const GO={
  async order(){const n=V('c_name'),p=V('c_phone'),ad=V('c_addr');if(!n||!p||!ad)return toast('اكتب الاسم والجوال والعنوان');
-  const j=await api('createOrder',{cname:n,cphone:p,region:$('c_region').value,addr:ad,note:V('c_note')});
+  const j=await api('createOrder',{cname:n,cphone:p,region:$('c_region').value,addr:ad,note:V('c_note'),...(CL?{lat:CL.lat,lng:CL.lng}:{})});
   ls.set('prof',{name:n,phone:p,addr:ad});
-  $('c_note').value='';toast('تم إرسال طلبك، المبلغ '+money(j.total));await renderC()},
+  $('c_note').value='';CL=null;$('c_geo').textContent='';toast('تم إرسال طلبك، المبلغ '+money(j.total));await renderC()},
  async register(){const n=V('r_name'),p=V('r_phone'),pw=$('r_pass').value;if(!n||!p||pw.length<6)return toast('اكتب الاسم والجوال وكلمة سر من 6 أحرف على الأقل');
   if(!idImg||!selfie)return toast('ارفع صورة الهوية والتقط صورتك بالكاميرا');
   await api('register',{name:n,phone:p,pass:pw,veh:$('r_veh').value,scope:$('r_scope').value,idImg,selfie});
   toast('تم التسجيل، بانتظار موافقة المشرف');['r_name','r_phone','r_pass'].forEach(i=>$(i).value='');resetKyc()},
+ geo(){return new Promise((res)=>{if(!navigator.geolocation){toast('المتصفح لا يدعم تحديد الموقع');return res()}
+  $('c_geo').textContent='جارٍ تحديد موقعك…';
+  navigator.geolocation.getCurrentPosition(async p=>{CL={lat:p.coords.latitude,lng:p.coords.longitude};
+   try{const j=await api('nearby',{lat:CL.lat,lng:CL.lng,region:$('c_region').value});$('c_geo').textContent='✓ تم تحديد موقعك. '+(j.count?`سائقون متاحون قريبون: ${j.count} (أقربهم نحو ${j.nearest} كم)`:'لا يوجد سائقون متاحون قريبون الآن، وسيصل طلبك لمن يتاح.')}
+   catch(e){$('c_geo').textContent='✓ تم تحديد موقعك.'}res()},
+  e=>{CL=null;$('c_geo').textContent=e.code===1?'لم تسمح بالموقع. فعّله من إعدادات المتصفح أو اطلب بدونه.':'تعذر تحديد الموقع، حاول مرة أخرى.';res()},{enableHighAccuracy:true,timeout:20000,maximumAge:30000})})},
  async ulogin(){await api('uLogin',{username:V('u_user'),pass:$('u_pass').value});ls.set('su',1);$('u_pass').value='';await renderC()},
  async uregister(){if($('g_pass').value!==$('g_pass2').value)return toast('كلمتا المرور غير متطابقتين');await api('uRegister',{username:V('g_user'),pass:$('g_pass').value,pass2:$('g_pass2').value});ls.set('su',1);['g_user','g_pass','g_pass2'].forEach(i=>$(i).value='');await renderC()},
- async ulogout(){await api('uLogout').catch(()=>{});ls.set('su',0);CO=[];await renderC()},
+ async ulogout(){const P=prox();if(P&&proxId){P.stop().catch(()=>{});proxId=null}await api('uLogout').catch(()=>{});ls.set('su',0);CO=[];await renderC()},
  async login(){await api('login',{phone:V('l_phone'),pass:$('l_pass').value});ls.set('sd',1);$('l_pass').value='';await renderD()},
- async logout(){await api('logout').catch(()=>{});ls.set('sd',0);await renderD()},
+ async logout(){stopGeo();proxDriver(false);await api('logout').catch(()=>{});ls.set('sd',0);await renderD()},
  async toggle(){await api('toggle');await renderD()},
  camfront(){camStart('user')},camrear(){camStart('environment')},snap,
  async alogin(){if(!adminName)return toast('اكتب اسمك المخصص في خانة الاسم أولاً');await api('adminLogin',{name:adminName,password:$('a_pass').value});$('a_pass').value='';ADM=null;await renderA()},
